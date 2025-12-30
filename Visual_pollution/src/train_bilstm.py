@@ -1,78 +1,85 @@
 import pandas as pd
-import torch
-import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
-from bilstm_model import BiLSTM
+import ast
+import numpy as np
+from sklearn.model_selection import train_test_split
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Embedding, Bidirectional, LSTM, Dense, Dropout
+from tensorflow.keras.utils import to_categorical
 
-# ---------------- LOAD DATA ----------------
+# ================= LOAD DATA =================
 df = pd.read_csv("../data/bilstm_sequences.csv")
 
-# Convert sequences to list of ints
-df["sequence"] = df["sequence"].apply(lambda x: list(map(int, x.split())))
+# Convert string "[4,4,4]" → list
+df["class_sequence"] = df["class_sequence"].apply(ast.literal_eval)
 
-# --------- SIMPLE SEVERITY LABELING (RULE-BASED) ----------
-def assign_label(seq):
-    if len(seq) >= 6:
-        return 2  # High pollution
-    elif len(seq) >= 3:
-        return 1  # Medium pollution
+X = df["class_sequence"].tolist()
+
+# ---------------- LABEL CREATION ----------------
+# Simple severity rule (for demo + paper)
+# 1–2 objects → Low
+# 3–4 objects → Medium
+# ≥5 objects → High
+def severity_label(seq):
+    if len(seq) <= 2:
+        return 0  # Low
+    elif len(seq) <= 4:
+        return 1  # Medium
     else:
-        return 0  # Low pollution
+        return 2  # High
 
-df["label"] = df["sequence"].apply(assign_label)
+y = df["class_sequence"].apply(severity_label).values
+y = to_categorical(y, num_classes=3)
 
-# ---------------- DATASET ----------------
-class PollutionDataset(Dataset):
-    def __init__(self, sequences, labels):
-        self.sequences = sequences
-        self.labels = labels
+# ================= SEQUENCE PROCESSING =================
+MAX_LEN = 10   # max sequence length
+NUM_CLASSES = 11  # YOLO classes (0–10)
 
-    def __len__(self):
-        return len(self.sequences)
+X_pad = pad_sequences(
+    X,
+    maxlen=MAX_LEN,
+    padding="post",
+    truncating="post"
+)
 
-    def __getitem__(self, idx):
-        return (
-            torch.tensor(self.sequences[idx], dtype=torch.long),
-            torch.tensor(self.labels[idx], dtype=torch.long),
-        )
+X_train, X_val, y_train, y_val = train_test_split(
+    X_pad, y, test_size=0.2, random_state=42
+)
 
-def collate_fn(batch):
-    sequences, labels = zip(*batch)
-    max_len = max(len(seq) for seq in sequences)
+# ================= BiLSTM MODEL =================
+model = Sequential([
+    Embedding(
+        input_dim=NUM_CLASSES,
+        output_dim=64,
+        input_length=MAX_LEN
+    ),
+    Bidirectional(LSTM(64, return_sequences=True)),
+    Dropout(0.3),
+    Bidirectional(LSTM(32)),
+    Dense(32, activation="relu"),
+    Dense(3, activation="softmax")
+])
 
-    padded = torch.zeros(len(sequences), max_len, dtype=torch.long)
-    for i, seq in enumerate(sequences):
-        padded[i, :len(seq)] = seq
+model.compile(
+    optimizer="adam",
+    loss="categorical_crossentropy",
+    metrics=["accuracy"]
+)
 
-    return padded, torch.tensor(labels)
+# ================= TRAIN =================
+model.summary()
 
-dataset = PollutionDataset(df["sequence"].tolist(), df["label"].tolist())
-loader = DataLoader(dataset, batch_size=16, shuffle=True, collate_fn=collate_fn)
+model.fit(
+    X_train,
+    y_train,
+    validation_data=(X_val, y_val),
+    epochs=20,
+    batch_size=32
+)
 
-# ---------------- MODEL ----------------
-# Dynamically compute vocab size from data
-max_class_id = max(max(seq) for seq in df["sequence"])
-vocab_size = max_class_id + 1
+# ================= SAVE =================
+model.save("../models/bilstm_severity_model.h5")
+print("✅ BiLSTM model trained and saved")
 
-model = BiLSTM(vocab_size=vocab_size)
-
-criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-
-# ---------------- TRAIN ----------------
-epochs = 10
-for epoch in range(epochs):
-    total_loss = 0
-    for x, y in loader:
-        optimizer.zero_grad()
-        outputs = model(x)
-        loss = criterion(outputs, y)
-        loss.backward()
-        optimizer.step()
-        total_loss += loss.item()
-
-    print(f"Epoch {epoch+1}/{epochs}, Loss: {total_loss:.4f}")
-
-# ---------------- SAVE MODEL ----------------
-torch.save(model.state_dict(), "../models/yolo/bilstm.pt")
-print("✅ BiLSTM training completed and model saved.")
+model.build(input_shape=(None, MAX_LEN))
+model.summary()
