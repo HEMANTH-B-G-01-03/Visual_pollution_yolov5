@@ -87,7 +87,7 @@
 import os
 import pandas as pd
 from collections import defaultdict
-
+import matplotlib as plt 
 # ===== PATHS =====
 BASE_PATH = "../data"
 
@@ -169,3 +169,26 @@ df.to_excel("../results/class_distribution_table.xlsx", index=False)
 
 print("✅ Class distribution table generated successfully")
 print(df)
+
+
+# ===== SAVE AS JPG IMAGE =====
+plt.figure(figsize=(14, 6))
+plt.axis('off')
+
+table = plt.table(
+    cellText=df.values,
+    colLabels=df.columns,
+    loc='center',
+    cellLoc='center'
+)
+
+table.auto_set_font_size(False)
+table.set_fontsize(10)
+table.scale(1, 1.6)
+
+plt.title("Class-wise Dataset Distribution", fontsize=14, pad=20)
+
+plt.savefig("../results/class_distribution_table.jpg", dpi=300, bbox_inches='tight')
+plt.close()
+
+print("🖼️ JPG image saved successfully")
