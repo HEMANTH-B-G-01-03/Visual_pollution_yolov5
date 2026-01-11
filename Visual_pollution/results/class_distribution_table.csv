@@ -1,0 +1,12 @@
+Class Label,Training Images,Validation Images,Testing Images
+garbage,481,139,6
+posters,68,14,1
+poles,898,238,22
+banners,3039,786,32
+construction_barrier,840,197,33
+broken_signboard,60,9,2
+potholes,1,0,0
+clutter_sidewalk,791,218,15
+road_damage,406,83,8
+graffiti,905,223,20
+other,63,9,3
